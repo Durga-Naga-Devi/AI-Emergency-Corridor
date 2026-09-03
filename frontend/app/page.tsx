@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -24,9 +24,7 @@ import {
   Video,
 } from "lucide-react";
 
-// ============================================================
-// TYPES
-// ============================================================
+const API_URL = "https://ai-emergency-corridor-production.up.railway.app";
 
 type BackendData = {
   eta?: number;
@@ -37,730 +35,749 @@ type BackendData = {
   detectedVehicle?: string;
 };
 
-// ============================================================
-// MAIN PAGE
-// ============================================================
+type EventProps = {
+  active: boolean;
+  text: string;
+};
+
+function Event({ active, text }: EventProps) {
+  return (
+    <div
+      className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-all ${
+        active
+          ? "border-emerald-500/30 bg-emerald-500/10 text-slate-200"
+          : "border-slate-800 bg-slate-900/40 text-slate-600"
+      }`}
+    >
+      <div
+        className={`h-2 w-2 rounded-full ${
+          active
+            ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"
+            : "bg-slate-700"
+        }`}
+      />
+
+      <span className="text-xs">{text}</span>
+
+      {active && <CheckCircle2 className="ml-auto h-4 w-4 text-emerald-400" />}
+    </div>
+  );
+}
+
+function Junction({
+  left,
+  top,
+  active,
+  label,
+}: {
+  left: string;
+  top: string;
+  active: boolean;
+  label: string;
+}) {
+  return (
+    <div
+      className="absolute -translate-x-1/2 -translate-y-1/2"
+      style={{ left, top }}
+    >
+      <div className="flex flex-col items-center gap-1">
+        <div
+          className={`flex h-9 w-9 items-center justify-center rounded-full border ${
+            active
+              ? "border-emerald-400 bg-emerald-500/20 shadow-[0_0_18px_rgba(52,211,153,0.45)]"
+              : "border-slate-600 bg-slate-800"
+          }`}
+        >
+          <TrafficCone
+            className={`h-4 w-4 ${
+              active ? "text-emerald-300" : "text-slate-500"
+            }`}
+          />
+        </div>
+
+        <span className="whitespace-nowrap text-[9px] font-medium text-slate-500">
+          {label}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
   const [emergencyActive, setEmergencyActive] = useState(false);
   const [simulationStep, setSimulationStep] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
-
   const [message, setMessage] = useState("Waiting for emergency...");
-
   const [backendData, setBackendData] = useState<BackendData>({});
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
-  const [yoloDetected, setYoloDetected] = useState(false);
+  const corridorActive = simulationStep >= 5 && simulationStep < 7;
+  const signalsActive = simulationStep >= 4 && simulationStep < 7;
+  const ambulanceArrived = simulationStep >= 6;
 
-  const [yoloLoading, setYoloLoading] = useState(false);
+  useEffect(() => {
+    if (!isRunning) return;
 
-  const [yoloConfidence, setYoloConfidence] = useState(0);
+    const interval = setInterval(() => {
+      setElapsedSeconds((previous) => previous + 1);
+    }, 1000);
 
-  const [detectedVehicle, setDetectedVehicle] = useState("—");
-
-  // ==========================================================
-  // YOLO DETECTION
-  // ==========================================================
-
-  const runYoloDetection = async () => {
-    setYoloLoading(true);
-
-    setMessage("AI Vision analyzing ambulance video...");
-
-    try {
-      const response = await fetch("http://127.0.0.1:8000/detect");
-
-      if (!response.ok) {
-        throw new Error("YOLO detection failed");
-      }
-
-      const data = await response.json();
-
-      console.log("YOLO RESULT:", data);
-
-      const detected = data.emergency_vehicle_candidate === true;
-
-      setYoloDetected(detected);
-
-      setYoloConfidence(data.confidence || 0);
-
-      setDetectedVehicle(data.detected_vehicle || "Unknown");
-
-      setBackendData((previous) => ({
-        ...previous,
-        confidence: data.confidence || 0,
-        detectedVehicle: data.detected_vehicle || "Unknown",
-      }));
-
-      if (detected) {
-        setMessage(
-          `Emergency vehicle candidate detected — ${data.confidence}% confidence`,
-        );
-      } else {
-        setMessage("No emergency vehicle candidate detected.");
-      }
-
-      return detected;
-    } catch (error) {
-      console.error(error);
-
-      setMessage("AI detection unavailable. Starting demo simulation.");
-
-      return false;
-    } finally {
-      setYoloLoading(false);
-    }
-  };
-
-  // ==========================================================
-  // EMERGENCY API
-  // ==========================================================
-
-  const activateEmergency = async () => {
-    try {
-      const response = await fetch("http://127.0.0.1:8000/emergency", {
-        method: "POST",
-
-        headers: {
-          "Content-Type": "application/json",
-        },
-
-        body: JSON.stringify({
-          ambulance_id: "AMB-104",
-
-          latitude: 17.6868,
-
-          longitude: 83.2185,
-
-          destination: "City Hospital",
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Emergency API failed");
-      }
-
-      const data = await response.json();
-
-      setBackendData((previous) => ({
-        ...previous,
-
-        eta: data.route?.eta_minutes,
-
-        confidence: previous.confidence || data.ai_confidence,
-
-        traffic: data.traffic_analysis?.density,
-
-        signals: data.signals?.coordinated,
-
-        timeSaved: data.route?.time_saved_minutes || 8,
-      }));
-
-      return true;
-    } catch (error) {
-      console.error("Emergency API error:", error);
-
-      // Demo still continues if backend
-      // temporarily becomes unavailable.
-      setBackendData({
-        eta: 6.42,
-        confidence: yoloConfidence || 96.8,
-        traffic: 42,
-        signals: 4,
-        timeSaved: 8,
-      });
-
-      return false;
-    }
-  };
-
-  // ==========================================================
-  // START SIMULATION
-  // ==========================================================
+    return () => clearInterval(interval);
+  }, [isRunning]);
 
   const startSimulation = async () => {
     if (isRunning) return;
 
     setIsRunning(true);
     setEmergencyActive(true);
+    setElapsedSeconds(0);
     setSimulationStep(1);
+    setMessage("AI Vision monitoring road...");
 
-    setMessage("AI Vision detecting emergency vehicle...");
+    try {
+      const detectResponse = await fetch(`${API_URL}/detect`);
 
-    // --------------------------------------------------------
-    // STEP 1 - YOLO DETECTION
-    // --------------------------------------------------------
+      if (detectResponse.ok) {
+        const detectData = await detectResponse.json();
 
-    const detected = await runYoloDetection();
-
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-
-    // Even if YOLO fails, continue the demo.
-    if (detected || !detected) {
-      setSimulationStep(2);
-
-      setMessage("Analyzing traffic conditions...");
+        setBackendData((previous) => ({
+          ...previous,
+          confidence: detectData.confidence,
+          detectedVehicle: detectData.detected_vehicle,
+        }));
+      }
+    } catch (error) {
+      console.error("Detection API error:", error);
+      setMessage("AI detection running in simulation mode...");
     }
 
-    // --------------------------------------------------------
-    // STEP 2 - TRAFFIC ANALYSIS
-    // --------------------------------------------------------
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    setSimulationStep(2);
+    setMessage("Analyzing traffic density...");
 
-    setBackendData((previous) => ({
-      ...previous,
-      traffic: previous.traffic || 42,
-    }));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
     setSimulationStep(3);
+    setMessage("Calculating optimal emergency route...");
 
-    setMessage("AI calculating optimal emergency route...");
+    try {
+      const emergencyResponse = await fetch(`${API_URL}/emergency`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ambulance_id: "AMB-104",
+          latitude: 17.6868,
+          longitude: 83.2185,
+          destination: "City Hospital",
+        }),
+      });
 
-    // --------------------------------------------------------
-    // STEP 3 - ROUTE
-    // --------------------------------------------------------
+      if (emergencyResponse.ok) {
+        const emergencyData = await emergencyResponse.json();
 
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+        setBackendData((previous) => ({
+          ...previous,
+          eta: emergencyData.route?.eta_minutes,
+          timeSaved: emergencyData.route?.time_saved_minutes,
+          traffic: emergencyData.traffic_analysis?.density,
+          signals: emergencyData.signals?.coordinated,
+          confidence: emergencyData.ai_confidence ?? previous.confidence,
+        }));
+      }
+    } catch (error) {
+      console.error("Emergency API error:", error);
+    }
 
-    const emergencyResult = await activateEmergency();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
     setSimulationStep(4);
+    setMessage("Coordinating 4 traffic signals...");
 
-    setMessage("Coordinating traffic signals...");
-
-    // --------------------------------------------------------
-    // STEP 4 - SIGNALS
-    // --------------------------------------------------------
-
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-
-    setBackendData((previous) => ({
-      ...previous,
-      signals: previous.signals || 4,
-    }));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
     setSimulationStep(5);
+    setMessage("Emergency corridor activated.");
 
-    setMessage("Emergency corridor ACTIVE");
-
-    // --------------------------------------------------------
-    // STEP 5 - CORRIDOR
-    // --------------------------------------------------------
+    await new Promise((resolve) => setTimeout(resolve, 3000));
 
     setSimulationStep(6);
+    setMessage("Ambulance reached City Hospital.");
 
-    setMessage("Ambulance reached City Hospital");
-
-    // Wait briefly so the arrival is visible
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    // Deactivate emergency corridor
     try {
-      const response = await fetch("http://127.0.0.1:8000/deactivate", {
+      const response = await fetch(`${API_URL}/deactivate`, {
         method: "POST",
       });
 
-      if (response.ok) {
-        console.log("Emergency corridor deactivated");
+      if (!response.ok) {
+        console.error("Deactivation request failed");
       }
     } catch (error) {
       console.error("Deactivation API error:", error);
     }
 
     setSimulationStep(7);
-
-    setMessage("Emergency completed — traffic signals restored");
-
+    setMessage("Emergency completed — traffic signals restored.");
     setIsRunning(false);
   };
-
-  // ==========================================================
-  // RESET
-  // ==========================================================
 
   const resetSimulation = () => {
     setEmergencyActive(false);
-
     setSimulationStep(0);
-
     setIsRunning(false);
-
-    setMessage("Waiting for emergency...");
-
+    setElapsedSeconds(0);
     setBackendData({});
-
-    setYoloDetected(false);
-
-    setYoloLoading(false);
-
-    setYoloConfidence(0);
-
-    setDetectedVehicle("—");
+    setMessage("Waiting for emergency...");
   };
 
-  // ==========================================================
-  // STATUS HELPERS
-  // ==========================================================
+  const displayConfidence =
+    backendData.confidence !== undefined
+      ? `${backendData.confidence.toFixed(2)}%`
+      : "--";
 
-  const corridorActive = simulationStep >= 5 && simulationStep < 7;
+  const displayEta =
+    backendData.eta !== undefined
+      ? `${backendData.eta.toFixed(2)} min`
+      : "6.42 min";
 
-  const ambulanceArrived = simulationStep >= 6;
+  const displayTraffic =
+    backendData.traffic !== undefined ? `${backendData.traffic}%` : "42%";
 
-  const signalsActive = simulationStep >= 4 && simulationStep < 7;
+  const displaySignals = signalsActive
+    ? `${backendData.signals ?? 4}/4`
+    : "0/4";
 
-  // ==========================================================
-  // UI
-  // ==========================================================
+  const displayTimeSaved =
+    backendData.timeSaved !== undefined
+      ? `${backendData.timeSaved} min`
+      : "8 min";
 
   return (
-    <main className="min-h-screen bg-[#05080d] text-white">
-      {/* ====================================================
-          HEADER
-      ==================================================== */}
-
-      <header className="border-b border-white/10 bg-[#080c12]">
-        <div className="mx-auto flex max-w-[1500px] items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-500/10 border border-red-500/30">
-              <Siren className="text-red-400" size={24} />
+    <main className="min-h-screen bg-[#05070a] text-white">
+      {/* HEADER */}
+      <header className="border-b border-slate-800 bg-[#070a0f]/95">
+        <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/10">
+              <Siren className="h-5 w-5 text-red-400" />
             </div>
 
             <div>
-              <div className="text-lg font-bold tracking-[0.25em]">
-                E-CORRIDOR
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold tracking-[0.2em]">
+                  E-CORRIDOR
+                </h1>
+
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold text-emerald-400">
+                  LIVE
+                </span>
               </div>
 
-              <div className="text-[10px] uppercase tracking-[0.25em] text-gray-500">
+              <p className="text-[10px] uppercase tracking-[0.25em] text-slate-500">
                 AI Emergency Traffic Control
-              </div>
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-6">
-            <div className="hidden items-center gap-2 text-xs text-gray-400 md:flex">
-              <Wifi size={14} className="text-green-400" />
-              SYSTEM ONLINE
+          <div className="flex items-center gap-5">
+            <div className="hidden items-center gap-2 text-xs text-slate-400 sm:flex">
+              <Wifi className="h-4 w-4 text-emerald-400" />
+              System Online
             </div>
 
-            <div className="flex items-center gap-2 rounded-full border border-green-500/20 bg-green-500/5 px-3 py-1.5 text-xs text-green-400">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
-              LIVE
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <Radio className="h-4 w-4" />
+              Emergency Operations Center
             </div>
           </div>
         </div>
       </header>
 
-      {/* ====================================================
-          CONTENT
-      ==================================================== */}
-
-      <div className="mx-auto max-w-[1500px] px-6 py-6">
-        {/* ==================================================
-            TITLE
-        ================================================== */}
-
+      <div className="mx-auto max-w-[1600px] px-6 py-6">
+        {/* TITLE */}
         <div className="mb-6">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-red-400">
-            <Activity size={14} />
-            Emergency Operations Center
+          <div className="mb-2 flex items-center gap-2">
+            <Activity className="h-5 w-5 text-red-400" />
+            <span className="text-xs font-semibold uppercase tracking-[0.25em] text-red-400">
+              Emergency Response System
+            </span>
           </div>
 
-          <h1 className="mt-2 text-3xl font-bold tracking-tight">
+          <h2 className="text-3xl font-bold tracking-tight">
             Emergency Corridor Control
-          </h1>
+          </h2>
 
-          <p className="mt-1 text-sm text-gray-500">
+          <p className="mt-2 text-sm text-slate-500">
             AI-powered ambulance detection, route optimization and traffic
             signal coordination
           </p>
         </div>
 
-        {/* ==================================================
-            EMERGENCY STATUS
-        ================================================== */}
-
-        <div
-          className={`mb-6 flex items-center justify-between rounded-2xl border p-4 transition-all ${
-            emergencyActive
-              ? "border-red-500/40 bg-red-500/10"
-              : "border-white/10 bg-white/[0.02]"
-          }`}
-        >
-          <div className="flex items-center gap-4">
-            <div
-              className={`flex h-12 w-12 items-center justify-center rounded-xl ${
-                emergencyActive ? "bg-red-500/20" : "bg-white/5"
-              }`}
-            >
-              <AlertTriangle
-                size={24}
-                className={emergencyActive ? "text-red-400" : "text-gray-500"}
-              />
-            </div>
-
-            <div>
-              <div className="text-xs uppercase tracking-widest text-gray-500">
+        {/* STAT CARDS */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl border border-red-500/20 bg-[#0a0d12] p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-xs uppercase tracking-wider text-slate-500">
                 Emergency Status
+              </span>
+              <AlertTriangle className="h-4 w-4 text-red-400" />
+            </div>
+
+            <div className="text-xl font-bold text-red-400">
+              {emergencyActive ? "EMERGENCY DETECTED" : "STANDBY"}
+            </div>
+
+            <p className="mt-1 text-xs text-slate-600">
+              {emergencyActive
+                ? "Emergency response active"
+                : "Waiting for emergency"}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-[#0a0d12] p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-xs uppercase tracking-wider text-slate-500">
+                Ambulance
+              </span>
+              <Ambulance className="h-4 w-4 text-red-400" />
+            </div>
+
+            <div className="text-xl font-bold">AMB-104</div>
+
+            <p className="mt-1 text-xs text-slate-600">
+              {emergencyActive ? "Emergency detected" : "Standby vehicle"}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-[#0a0d12] p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-xs uppercase tracking-wider text-slate-500">
+                Estimated ETA
+              </span>
+              <Clock3 className="h-4 w-4 text-cyan-400" />
+            </div>
+
+            <div className="text-xl font-bold text-cyan-400">{displayEta}</div>
+
+            <p className="mt-1 text-xs text-slate-600">Optimal route</p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-[#0a0d12] p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-xs uppercase tracking-wider text-slate-500">
+                Traffic Density
+              </span>
+              <Gauge className="h-4 w-4 text-amber-400" />
+            </div>
+
+            <div className="text-xl font-bold text-amber-400">
+              {displayTraffic}
+            </div>
+
+            <p className="mt-1 text-xs text-slate-600">Current road load</p>
+          </div>
+        </div>
+
+        {/* SECONDARY STATS */}
+        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="rounded-xl border border-slate-800 bg-[#0a0d12] p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-slate-500">
+                  AI Confidence
+                </p>
+
+                <p className="mt-2 text-2xl font-bold text-violet-400">
+                  {displayConfidence}
+                </p>
+
+                <p className="mt-1 text-xs text-slate-600">Vehicle candidate</p>
               </div>
 
-              <div
-                className={`mt-1 font-semibold ${
-                  emergencyActive ? "text-red-400" : "text-gray-300"
-                }`}
-              >
-                {emergencyActive
-                  ? corridorActive
-                    ? "EMERGENCY CORRIDOR ACTIVE"
-                    : "EMERGENCY DETECTED"
-                  : "NO ACTIVE EMERGENCY"}
-              </div>
+              <Brain className="h-6 w-6 text-violet-400" />
             </div>
           </div>
 
-          <div className="hidden text-right md:block">
-            <div className="text-xs text-gray-500">SYSTEM MESSAGE</div>
+          <div className="rounded-xl border border-slate-800 bg-[#0a0d12] p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-slate-500">
+                  Elapsed Response Time
+                </p>
 
-            <div className="mt-1 text-sm text-gray-300">{message}</div>
+                <p className="mt-2 text-2xl font-bold text-cyan-400">
+                  {elapsedSeconds}s
+                </p>
+
+                <p className="mt-1 text-xs text-slate-600">Simulation timer</p>
+              </div>
+
+              <Clock3 className="h-6 w-6 text-cyan-400" />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-[#0a0d12] p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-slate-500">
+                  Vehicle Candidate
+                </p>
+
+                <p className="mt-2 text-2xl font-bold uppercase text-slate-200">
+                  {backendData.detectedVehicle ?? "TRUCK"}
+                </p>
+
+                <p className="mt-1 text-xs text-slate-600">
+                  YOLO detection result
+                </p>
+              </div>
+
+              <Navigation className="h-6 w-6 text-slate-400" />
+            </div>
           </div>
         </div>
 
-        {/* ==================================================
-            STAT CARDS
-        ================================================== */}
-
-        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <StatCard
-            icon={<Ambulance size={20} />}
-            label="Ambulance"
-            value={emergencyActive ? "AMB-104" : "STANDBY"}
-            sub={emergencyActive ? "Emergency detected" : "Monitoring"}
-            active={emergencyActive}
-          />
-
-          <StatCard
-            icon={<Clock3 size={20} />}
-            label="Estimated ETA"
-            value={backendData.eta ? `${backendData.eta} min` : "—"}
-            sub="Optimal route"
-          />
-
-          <StatCard
-            icon={<Gauge size={20} />}
-            label="Traffic Density"
-            value={
-              backendData.traffic !== undefined
-                ? `${backendData.traffic}%`
-                : "—"
-            }
-            sub="Current road load"
-          />
-
-          <StatCard
-            icon={<Brain size={20} />}
-            label="AI Confidence"
-            value={yoloConfidence ? `${yoloConfidence.toFixed(2)}%` : "—"}
-            sub={yoloDetected ? "Vehicle candidate" : "AI Vision"}
-            active={yoloDetected}
-          />
-        </div>
-
-        {/* ==================================================
-            MAIN GRID
-        ================================================== */}
-
-        <div className="grid gap-6 xl:grid-cols-[1.65fr_0.8fr]">
-          {/* =================================================
-              MAP
-          ================================================= */}
-
-          <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#080d14]">
-            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-              <div className="flex items-center gap-3">
-                <Navigation size={17} className="text-cyan-400" />
-
+        {/* MAIN GRID */}
+        <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1.7fr_1fr]">
+          {/* LEFT */}
+          <div className="space-y-6">
+            {/* MAP */}
+            <section className="overflow-hidden rounded-xl border border-slate-800 bg-[#0a0d12]">
+              <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
                 <div>
-                  <div className="text-sm font-semibold">Live Traffic Map</div>
+                  <h3 className="flex items-center gap-2 text-sm font-semibold">
+                    <MapPin className="h-4 w-4 text-cyan-400" />
+                    Live Traffic Map
+                  </h3>
 
-                  <div className="text-[10px] uppercase tracking-widest text-gray-600">
+                  <p className="mt-1 text-[10px] text-slate-600">
                     Simulated city network
+                  </p>
+                </div>
+
+                <span className="flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[9px] font-bold text-emerald-400">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                  REAL-TIME
+                </span>
+              </div>
+
+              <div className="relative h-[470px] overflow-hidden bg-[#080b10]">
+                {/* ROAD NETWORK */}
+                <div className="absolute left-0 right-0 top-1/2 h-20 -translate-y-1/2 bg-[#11161d]" />
+                <div className="absolute bottom-0 left-[72%] top-0 w-20 -translate-x-1/2 bg-[#11161d]" />
+
+                <div className="absolute left-0 right-0 top-1/2 border-t border-dashed border-slate-700" />
+                <div className="absolute bottom-0 left-[72%] top-0 border-l border-dashed border-slate-700" />
+
+                {/* ROUTE */}
+                <div
+                  className={`absolute left-[10%] top-1/2 h-1 -translate-y-1/2 rounded-full transition-all duration-1000 ${
+                    simulationStep >= 3
+                      ? "w-[62%] bg-emerald-400 shadow-[0_0_14px_rgba(52,211,153,0.65)]"
+                      : "w-0"
+                  }`}
+                />
+
+                <div
+                  className={`absolute left-[72%] top-1/2 h-[22%] w-1 bg-emerald-400 transition-all duration-1000 ${
+                    simulationStep >= 3
+                      ? "opacity-100 shadow-[0_0_14px_rgba(52,211,153,0.65)]"
+                      : "opacity-0"
+                  }`}
+                />
+
+                {/* ROAD LABELS */}
+                <div className="absolute left-[18%] top-[43%] text-[9px] font-semibold tracking-widest text-slate-600">
+                  CENTRAL ROAD
+                </div>
+
+                <div className="absolute left-[43%] top-[43%] text-[9px] font-semibold tracking-widest text-slate-600">
+                  MAIN JUNCTION
+                </div>
+
+                {/* JUNCTIONS */}
+                <Junction
+                  left="25%"
+                  top="50%"
+                  active={simulationStep >= 4}
+                  label="SIG-01"
+                />
+
+                <Junction
+                  left="48%"
+                  top="50%"
+                  active={simulationStep >= 4}
+                  label="SIG-02"
+                />
+
+                <Junction
+                  left="72%"
+                  top="50%"
+                  active={simulationStep >= 4}
+                  label="SIG-03"
+                />
+
+                <Junction
+                  left="72%"
+                  top="72%"
+                  active={simulationStep >= 4}
+                  label="SIG-04"
+                />
+
+                {/* AMBULANCE */}
+                <div
+                  className="absolute top-[calc(50%-20px)] z-20 transition-all duration-[3000ms] ease-in-out"
+                  style={{
+                    left: ambulanceArrived
+                      ? "68%"
+                      : simulationStep >= 3
+                        ? "58%"
+                        : "10%",
+                  }}
+                >
+                  <div className="flex flex-col items-center">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-red-400/50 bg-red-500/20 shadow-[0_0_20px_rgba(248,113,113,0.45)]">
+                      <Ambulance className="h-6 w-6 text-red-300" />
+                    </div>
+
+                    <span className="mt-1 rounded bg-slate-950/90 px-1.5 py-0.5 text-[8px] font-bold text-red-300">
+                      AMB-104
+                    </span>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex items-center gap-2 text-[10px] text-gray-500">
-                <Radio size={13} />
-                REAL-TIME
-              </div>
-            </div>
+                {/* HOSPITAL */}
+                <div className="absolute left-[72%] top-[78%] -translate-x-1/2">
+                  <div className="flex flex-col items-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-cyan-400/40 bg-cyan-500/10 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
+                      <Hospital className="h-6 w-6 text-cyan-300" />
+                    </div>
 
-            {/* MAP AREA */}
+                    <span className="mt-1 text-[9px] font-bold tracking-wider text-cyan-300">
+                      CITY HOSPITAL
+                    </span>
+                  </div>
+                </div>
 
-            <div className="relative h-[520px] overflow-hidden bg-[#071018]">
-              {/* GRID */}
-
-              <div
-                className="absolute inset-0 opacity-20"
-                style={{
-                  backgroundImage:
-                    "linear-gradient(rgba(255,255,255,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.08) 1px, transparent 1px)",
-                  backgroundSize: "45px 45px",
-                }}
-              />
-
-              {/* ROADS */}
-
-              <div className="absolute left-0 right-0 top-[50%] h-16 -translate-y-1/2 bg-[#151c25] border-y border-white/10" />
-
-              <div className="absolute bottom-0 left-[48%] top-0 w-16 -translate-x-1/2 bg-[#151c25] border-x border-white/10" />
-
-              <div className="absolute bottom-0 right-[25%] top-0 w-14 bg-[#151c25] border-x border-white/10" />
-
-              <div className="absolute left-[25%] top-[50%] h-[55%] w-10 -translate-x-1/2 bg-[#151c25]" />
-
-              {/* ROUTE GLOW */}
-
-              {emergencyActive && (
-                <div className="absolute left-[10%] right-[15%] top-[50%] h-1 -translate-y-1/2 bg-red-500/60 shadow-[0_0_20px_rgba(239,68,68,0.8)] transition-all duration-700" />
-              )}
-
-              {/* ROAD LABELS */}
-
-              <div className="absolute left-8 top-[46%] text-[9px] font-semibold tracking-widest text-gray-600">
-                CENTRAL ROAD
-              </div>
-
-              <div className="absolute left-[49%] top-5 -translate-x-1/2 text-[9px] font-semibold tracking-widest text-gray-600">
-                MAIN JUNCTION
-              </div>
-
-              {/* JUNCTIONS */}
-
-              <Junction left="25%" top="50%" active={signalsActive} />
-
-              <Junction left="48%" top="50%" active={signalsActive} />
-
-              <Junction left="72%" top="50%" active={signalsActive} />
-
-              <Junction left="72%" top="72%" active={signalsActive} />
-
-              {/* AMBULANCE */}
-
-              <div
-                className="absolute top-[50%] -translate-y-1/2 transition-all duration-[1500ms] ease-in-out"
-                style={{
-                  left: ambulanceArrived
-                    ? "72%"
-                    : simulationStep >= 3
-                      ? "58%"
-                      : "10%",
-                }}
-              >
-                <div className="relative">
-                  <div
-                    className={`flex h-11 w-11 items-center justify-center rounded-xl border-2 shadow-xl ${
-                      emergencyActive
-                        ? "border-red-400 bg-red-500/20 shadow-red-500/30"
-                        : "border-blue-400 bg-blue-500/20"
-                    }`}
-                  >
-                    <Ambulance
-                      size={22}
-                      className={
-                        emergencyActive ? "text-red-400" : "text-blue-400"
-                      }
+                {/* MAP STATUS */}
+                <div className="absolute left-4 top-4 rounded-lg border border-slate-800 bg-black/50 px-3 py-2 backdrop-blur">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        corridorActive
+                          ? "animate-pulse bg-red-400"
+                          : "bg-slate-600"
+                      }`}
                     />
-                  </div>
 
-                  {emergencyActive && (
-                    <div className="absolute -inset-2 -z-10 animate-ping rounded-xl bg-red-500/20" />
-                  )}
-
-                  <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded bg-black/70 px-2 py-1 text-[9px] text-red-300">
-                    AMB-104
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      {corridorActive
+                        ? "Emergency Corridor Active"
+                        : "Network Monitoring"}
+                    </span>
                   </div>
                 </div>
               </div>
 
-              {/* HOSPITAL */}
+              <div className="flex flex-wrap gap-5 border-t border-slate-800 px-5 py-3">
+                <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                  <span className="h-2 w-5 rounded bg-emerald-400" />
+                  Emergency route
+                </div>
 
-              <div className="absolute right-[8%] top-[50%] -translate-y-1/2">
-                <div className="flex flex-col items-center">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-400/40 bg-cyan-400/10 shadow-[0_0_25px_rgba(34,211,238,0.15)]">
-                    <Hospital size={27} className="text-cyan-400" />
-                  </div>
+                <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                  Green signal
+                </div>
 
-                  <div className="mt-2 text-[9px] font-semibold tracking-widest text-cyan-400">
-                    CITY HOSPITAL
-                  </div>
+                <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                  <Hospital className="h-3 w-3 text-cyan-400" />
+                  Hospital
                 </div>
               </div>
+            </section>
 
-              {/* MAP LEGEND */}
+            {/* VIDEO */}
+            <section className="overflow-hidden rounded-xl border border-slate-800 bg-[#0a0d12]">
+              <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+                <div>
+                  <h3 className="flex items-center gap-2 text-sm font-semibold">
+                    <Video className="h-4 w-4 text-red-400" />
+                    Ambulance Feed
+                  </h3>
 
-              <div className="absolute bottom-4 left-4 rounded-xl border border-white/10 bg-black/50 p-3 backdrop-blur">
-                <div className="mb-2 text-[9px] uppercase tracking-widest text-gray-500">
-                  Legend
+                  <p className="mt-1 text-[10px] text-slate-600">
+                    Computer vision input
+                  </p>
                 </div>
 
-                <div className="space-y-2">
-                  <Legend dot="bg-red-400" label="Emergency route" />
-
-                  <Legend dot="bg-green-400" label="Green signal" />
-
-                  <Legend dot="bg-cyan-400" label="Hospital" />
-                </div>
+                <span className="text-[9px] font-bold text-red-400">
+                  YOLO INPUT
+                </span>
               </div>
-            </div>
-          </section>
 
-          {/* =================================================
-              RIGHT PANEL
-          ================================================= */}
+              <div className="bg-black">
+                <video
+                  src="/videos/ambulance.mp4"
+                  controls
+                  muted
+                  playsInline
+                  className="max-h-[430px] w-full object-contain"
+                />
+              </div>
+            </section>
+          </div>
 
+          {/* RIGHT */}
           <div className="space-y-6">
             {/* AI VISION */}
+            <section className="rounded-xl border border-violet-500/20 bg-[#0a0d12]">
+              <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+                <div>
+                  <h3 className="flex items-center gap-2 text-sm font-semibold">
+                    <Brain className="h-4 w-4 text-violet-400" />
+                    AI Vision
+                  </h3>
 
-            <section className="rounded-2xl border border-white/10 bg-[#080d14] p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-500/10">
-                    <Brain size={18} className="text-purple-400" />
-                  </div>
-
-                  <div>
-                    <div className="text-sm font-semibold">AI Vision</div>
-
-                    <div className="text-[10px] uppercase tracking-widest text-gray-600">
-                      YOLO Detection Engine
-                    </div>
-                  </div>
+                  <p className="mt-1 text-[10px] text-slate-600">
+                    YOLO Detection Engine
+                  </p>
                 </div>
 
-                <div
-                  className={`rounded-full px-2 py-1 text-[9px] ${
-                    yoloDetected
-                      ? "bg-green-500/10 text-green-400"
-                      : "bg-white/5 text-gray-500"
+                <span
+                  className={`rounded-full px-2 py-1 text-[9px] font-bold ${
+                    emergencyActive
+                      ? "bg-emerald-500/10 text-emerald-400"
+                      : "bg-slate-800 text-slate-500"
                   }`}
                 >
-                  {yoloDetected ? "DETECTED" : "STANDBY"}
-                </div>
+                  {emergencyActive ? "DETECTED" : "STANDBY"}
+                </span>
               </div>
 
-              {/* VIDEO */}
+              <div className="space-y-4 p-5">
+                <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs text-slate-500">
+                      Vehicle candidate
+                    </span>
 
-              <div className="mb-4 overflow-hidden rounded-xl border border-white/10 bg-black">
-                <div className="relative">
-                  <video
-                    src="/videos/ambulance.mp4"
-                    controls
-                    muted
-                    className="h-40 w-full object-cover"
-                  />
+                    <Ambulance className="h-4 w-4 text-red-400" />
+                  </div>
 
-                  <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg bg-black/70 px-2 py-1 text-[9px] text-white">
-                    <Video size={12} />
-                    AMBULANCE FEED
+                  <div className="text-lg font-bold uppercase">
+                    {backendData.detectedVehicle ?? "TRUCK"}
                   </div>
                 </div>
-              </div>
 
-              <div className="space-y-3">
-                <AnalysisRow
-                  label="Vehicle candidate"
-                  value={yoloDetected ? detectedVehicle.toUpperCase() : "—"}
-                  active={yoloDetected}
-                />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+                    <p className="text-[10px] uppercase tracking-wider text-slate-600">
+                      AI confidence
+                    </p>
 
-                <AnalysisRow
-                  label="AI confidence"
-                  value={yoloConfidence ? `${yoloConfidence.toFixed(2)}%` : "—"}
-                  active={yoloDetected}
-                />
+                    <p className="mt-2 text-xl font-bold text-violet-400">
+                      {displayConfidence}
+                    </p>
+                  </div>
 
-                <AnalysisRow
-                  label="Frames analyzed"
-                  value={yoloDetected ? "30" : "—"}
-                />
+                  <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+                    <p className="text-[10px] uppercase tracking-wider text-slate-600">
+                      Frames analyzed
+                    </p>
+
+                    <p className="mt-2 text-xl font-bold text-cyan-400">30</p>
+                  </div>
+                </div>
               </div>
             </section>
 
-            {/* CORRIDOR STATUS */}
+            {/* CORRIDOR */}
+            <section className="rounded-xl border border-slate-800 bg-[#0a0d12]">
+              <div className="border-b border-slate-800 px-5 py-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <Route className="h-4 w-4 text-emerald-400" />
+                  Emergency Corridor
+                </h3>
 
-            <section
-              className={`rounded-2xl border p-5 transition-all ${
-                corridorActive
-                  ? "border-green-500/40 bg-green-500/5"
-                  : "border-white/10 bg-[#080d14]"
-              }`}
-            >
-              <div className="mb-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`flex h-9 w-9 items-center justify-center rounded-lg ${
-                      corridorActive ? "bg-green-500/10" : "bg-white/5"
+                <p className="mt-1 text-[10px] text-slate-600">
+                  Route coordination
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 p-5">
+                <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-600">
+                    Status
+                  </p>
+
+                  <p
+                    className={`mt-2 text-lg font-bold ${
+                      corridorActive
+                        ? "text-emerald-400"
+                        : simulationStep >= 7
+                          ? "text-slate-400"
+                          : "text-amber-400"
                     }`}
                   >
-                    <Route
-                      size={18}
-                      className={
-                        corridorActive ? "text-green-400" : "text-gray-500"
-                      }
-                    />
-                  </div>
-
-                  <div>
-                    <div className="text-sm font-semibold">
-                      Emergency Corridor
-                    </div>
-
-                    <div className="text-[10px] uppercase tracking-widest text-gray-600">
-                      Route coordination
-                    </div>
-                  </div>
+                    {corridorActive
+                      ? "ACTIVE"
+                      : simulationStep >= 7
+                        ? "COMPLETED"
+                        : "STANDBY"}
+                  </p>
                 </div>
 
-                <div
-                  className={`text-xs font-bold ${
-                    corridorActive ? "text-green-400" : "text-gray-500"
-                  }`}
-                >
-                  {corridorActive ? "ACTIVE" : "STANDBY"}
+                <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-600">
+                    Signals
+                  </p>
+
+                  <p className="mt-2 text-lg font-bold text-emerald-400">
+                    {displaySignals}
+                  </p>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <MiniMetric
-                  label="Signals"
-                  value={backendData.signals ? `${backendData.signals}/4` : "—"}
-                />
+                <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-600">
+                    Time Saved
+                  </p>
 
-                <MiniMetric
-                  label="Time Saved"
-                  value={
-                    backendData.timeSaved ? `${backendData.timeSaved} min` : "—"
-                  }
-                />
+                  <p className="mt-2 text-lg font-bold text-cyan-400">
+                    {displayTimeSaved}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-600">
+                    Route
+                  </p>
+
+                  <p className="mt-2 text-sm font-semibold text-slate-300">
+                    4.8 km
+                  </p>
+                </div>
               </div>
             </section>
 
-            {/* EVENT STREAM */}
+            {/* EVENTS */}
+            <section className="rounded-xl border border-slate-800 bg-[#0a0d12]">
+              <div className="border-b border-slate-800 px-5 py-4">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <Activity className="h-4 w-4 text-cyan-400" />
+                  Event Stream
+                </h3>
 
-            <section className="rounded-2xl border border-white/10 bg-[#080d14] p-5">
-              <div className="mb-4 flex items-center gap-3">
-                <Activity size={17} className="text-cyan-400" />
-
-                <div>
-                  <div className="text-sm font-semibold">Event Stream</div>
-
-                  <div className="text-[10px] uppercase tracking-widest text-gray-600">
-                    Live system events
-                  </div>
-                </div>
+                <p className="mt-1 text-[10px] text-slate-600">
+                  Live system events
+                </p>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2 p-4">
                 <Event
                   active={simulationStep >= 1}
                   text="AI Vision monitoring road"
@@ -800,46 +817,46 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ==================================================
-            BOTTOM CONTROL PANEL
-        ================================================== */}
-
-        <section className="mt-6 rounded-2xl border border-white/10 bg-[#080d14] p-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        {/* CONTROL */}
+        <section className="mt-6 rounded-xl border border-red-500/20 bg-[#0a0d12] p-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <TrafficCone size={17} className="text-orange-400" />
-                Emergency Response Simulation
+              <div className="flex items-center gap-2">
+                <Zap className="h-5 w-5 text-red-400" />
+
+                <h3 className="font-semibold">Emergency Response Simulation</h3>
               </div>
 
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-2 text-xs text-slate-500">
                 Run the complete AI detection and emergency corridor workflow.
               </p>
+
+              <p className="mt-2 text-xs text-slate-600">{message}</p>
             </div>
 
             <div className="flex gap-3">
               <button
                 onClick={resetSimulation}
                 disabled={isRunning}
-                className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-xs font-semibold text-gray-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex items-center gap-2 rounded-lg border border-slate-700 px-5 py-3 text-xs font-semibold text-slate-400 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <RotateCcw size={15} />
+                <RotateCcw className="h-4 w-4" />
                 RESET
               </button>
 
               <button
                 onClick={startSimulation}
                 disabled={isRunning}
-                className="flex items-center justify-center gap-2 rounded-xl bg-red-500 px-6 py-3 text-xs font-bold tracking-wide text-white shadow-lg shadow-red-500/20 transition hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-6 py-3 text-xs font-bold text-red-400 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isRunning ? (
                   <>
-                    <Activity size={16} className="animate-pulse" />
-                    RUNNING...
+                    <Activity className="h-4 w-4 animate-pulse" />
+                    SIMULATION RUNNING
                   </>
                 ) : (
                   <>
-                    <Play size={16} />
+                    <Play className="h-4 w-4" />
                     START EMERGENCY SIMULATION
                   </>
                 )}
@@ -848,182 +865,16 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ==================================================
-            FOOTER
-        ================================================== */}
+        {/* FOOTER */}
+        <footer className="flex flex-col gap-2 border-t border-slate-900 py-6 text-[10px] text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+          <span>E-CORRIDOR AI RESPONSE SYSTEM</span>
 
-        <div className="mt-5 flex flex-col items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-gray-700 md:flex-row">
-          <div>E-CORRIDOR AI RESPONSE SYSTEM</div>
-
-          <div className="flex items-center gap-2">
-            <ShieldCheck size={12} />
+          <span className="flex items-center gap-2">
+            <ShieldCheck className="h-3 w-3" />
             Prototype • AI + Computer Vision
-          </div>
-        </div>
+          </span>
+        </footer>
       </div>
     </main>
-  );
-}
-
-// ============================================================
-// STAT CARD
-// ============================================================
-
-function StatCard({
-  icon,
-  label,
-  value,
-  sub,
-  active = false,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  sub: string;
-  active?: boolean;
-}) {
-  return (
-    <div
-      className={`rounded-2xl border p-4 ${
-        active
-          ? "border-red-500/30 bg-red-500/5"
-          : "border-white/10 bg-[#080d14]"
-      }`}
-    >
-      <div className="flex items-center justify-between">
-        <div className="text-gray-500">{icon}</div>
-
-        {active && (
-          <div className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
-        )}
-      </div>
-
-      <div className="mt-4 text-[10px] uppercase tracking-widest text-gray-600">
-        {label}
-      </div>
-
-      <div className="mt-1 text-xl font-bold">{value}</div>
-
-      <div className="mt-1 text-[10px] text-gray-500">{sub}</div>
-    </div>
-  );
-}
-
-// ============================================================
-// JUNCTION
-// ============================================================
-
-function Junction({
-  left,
-  top,
-  active,
-}: {
-  left: string;
-  top: string;
-  active: boolean;
-}) {
-  return (
-    <div
-      className="absolute -translate-x-1/2 -translate-y-1/2"
-      style={{ left, top }}
-    >
-      <div
-        className={`flex h-8 w-8 items-center justify-center rounded-lg border ${
-          active
-            ? "border-green-400/50 bg-green-400/10"
-            : "border-yellow-500/30 bg-yellow-500/10"
-        }`}
-      >
-        <div
-          className={`h-3 w-3 rounded-full ${
-            active
-              ? "bg-green-400 shadow-[0_0_12px_rgba(74,222,128,0.8)]"
-              : "bg-yellow-400"
-          }`}
-        />
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// LEGEND
-// ============================================================
-
-function Legend({ dot, label }: { dot: string; label: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className={`h-2 w-2 rounded-full ${dot}`} />
-
-      <span className="text-[9px] text-gray-500">{label}</span>
-    </div>
-  );
-}
-
-// ============================================================
-// ANALYSIS ROW
-// ============================================================
-
-function AnalysisRow({
-  label,
-  value,
-  active = false,
-}: {
-  label: string;
-  value: string;
-  active?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between border-b border-white/5 pb-2">
-      <span className="text-xs text-gray-500">{label}</span>
-
-      <span
-        className={`text-xs font-semibold ${
-          active ? "text-green-400" : "text-gray-300"
-        }`}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-// ============================================================
-// MINI METRIC
-// ============================================================
-
-function MiniMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
-      <div className="text-[9px] uppercase tracking-widest text-gray-600">
-        {label}
-      </div>
-
-      <div className="mt-1 text-sm font-bold">{value}</div>
-    </div>
-  );
-}
-
-// ============================================================
-// EVENT
-// ============================================================
-
-function Event({ active, text }: { active: boolean; text: string }) {
-  return (
-    <div
-      className={`flex items-center gap-3 text-xs transition-all ${
-        active ? "text-gray-300" : "text-gray-700"
-      }`}
-    >
-      <div
-        className={`h-1.5 w-1.5 rounded-full ${
-          active ? "bg-green-400" : "bg-gray-700"
-        }`}
-      />
-
-      <span>{text}</span>
-
-      {active && <CheckCircle2 size={12} className="ml-auto text-green-500" />}
-    </div>
   );
 }
