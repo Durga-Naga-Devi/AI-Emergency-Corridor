@@ -111,13 +111,7 @@ def detect():
     )
 
     # frontend/public/videos/ambulance.mp4
-    video_path = (
-        project_directory
-        / "frontend"
-        / "public"
-        / "videos"
-        / "ambulance.mp4"
-    )
+    video_path = backend_directory / "videos" / "ambulance.mp4"
 
     print()
     print("===================================")
